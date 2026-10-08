@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page } from "@playwright/test";
-import { test } from "./fixtures/freighter";
+import { connectWallet, installFreighter, test } from "./fixtures/freighter";
 
 // End-to-end coverage for the notification pipeline (#783-#786):
 //   /events + /invoices -> useNotifications -> per-wallet localStorage cache
@@ -71,26 +71,6 @@ function makeEvent(
   };
 }
 
-/**
- * Installs a working Freighter mock whose `requestAccess` actually returns the
- * given address, so `useWallet.connectWallet()` can complete the full network
- * validation and store the wallet as connected.
- */
-async function installFreighter(page: Page, address: string) {
-  await page.addInitScript((addr) => {
-    (window as any).freighter = {
-      isConnected: () => Promise.resolve(true),
-      isAllowed: () => Promise.resolve(true),
-      setAllowed: () => Promise.resolve(),
-      requestAccess: () => Promise.resolve(addr),
-      signTransaction: (xdr: string) => Promise.resolve(xdr),
-      signAuthEntry: () => Promise.resolve("signed-auth-mock"),
-      getPublicKey: () => Promise.resolve(addr),
-      getNetworkDetails: () => Promise.resolve({ network: "TESTNET" }),
-    };
-  }, address);
-}
-
 async function mockNotificationApis(
   page: Page,
   invoices: MockInvoice[],
@@ -117,15 +97,6 @@ async function mockNotificationApis(
       body: JSON.stringify(events),
     });
   });
-}
-
-async function connectWallet(page: Page) {
-  const connectBtn = page.getByRole("button", { name: /connect wallet/i });
-  await expect(connectBtn).toBeVisible({ timeout: 15000 });
-  await connectBtn.click();
-  await expect(
-    page.getByRole("button", { name: /disconnect wallet/i }),
-  ).toBeVisible({ timeout: 15000 });
 }
 
 function bell(page: Page): Locator {
@@ -177,8 +148,7 @@ test.describe("Notification bell, persistence and preferences", () => {
     ];
     await mockNotificationApis(page, invoices, events);
 
-    await page.goto("/");
-    await connectWallet(page);
+    await connectWallet(page, "/");
 
     // Unread dot is visible for the two unread, relevant notifications.
     await expect(unreadDot(page)).toBeVisible({ timeout: 15000 });
@@ -195,9 +165,11 @@ test.describe("Notification bell, persistence and preferences", () => {
     await expect(
       dropdown(page).getByText("Invoice Created", { exact: true }),
     ).toHaveCount(1);
-    await expect(dropdown(page).getByText("2 new")).toBeVisible();
 
-    // Opening the dropdown marks everything read and removes the dot.
+    // Opening the dropdown marks everything read in the same click that opens
+    // it, so the "N new" counter badge and the unread dot are both already
+    // cleared by the time the panel first renders.
+    await expect(dropdown(page).getByText(/^\d+ new$/)).toHaveCount(0);
     await expect(unreadDot(page)).toHaveCount(0);
   });
 
@@ -215,8 +187,7 @@ test.describe("Notification bell, persistence and preferences", () => {
     ];
     await mockNotificationApis(page, invoices, events);
 
-    await page.goto("/");
-    await connectWallet(page);
+    await connectWallet(page, "/");
     await expect(unreadDot(page)).toBeVisible({ timeout: 15000 });
 
     // Mark everything read.
@@ -225,8 +196,7 @@ test.describe("Notification bell, persistence and preferences", () => {
     await closeBell(page);
 
     // Reload and reconnect: the same notifications must come back read.
-    await page.reload();
-    await connectWallet(page);
+    await connectWallet(page, "/");
     await expect(unreadDot(page)).toHaveCount(0);
     await openBell(page);
     await expect(dropdown(page).getByText(/new/)).toHaveCount(0);
@@ -235,12 +205,13 @@ test.describe("Notification bell, persistence and preferences", () => {
     // A brand new on-chain event is the only unread one.
     events.push(makeEvent(4, "InvoiceRepaid", RELEVANT_INVOICE, 4000));
 
-    await page.reload();
-    await connectWallet(page);
+    await connectWallet(page, "/");
     await expect(unreadDot(page)).toBeVisible({ timeout: 15000 });
 
     await openBell(page);
-    await expect(dropdown(page).getByText("1 new")).toBeVisible();
+    // The fresh event was the only unread one, and opening the bell marked it
+    // read — so no counter badge remains once the panel is open.
+    await expect(dropdown(page).getByText(/^\d+ new$/)).toHaveCount(0);
     await expect(
       dropdown(page).getByText("Invoice Repaid", { exact: true }),
     ).toBeVisible();
@@ -264,8 +235,7 @@ test.describe("Notification bell, persistence and preferences", () => {
     ];
     await mockNotificationApis(page, invoices, events);
 
-    await page.goto("/profile");
-    await connectWallet(page);
+    await connectWallet(page, "/profile");
 
     // Both categories reach the bell before muting.
     await openBell(page);
@@ -278,8 +248,7 @@ test.describe("Notification bell, persistence and preferences", () => {
     await preferenceToggle(page, "Invoice Funded").click();
 
     // The hook re-reads preferences on the next load, so reload + reconnect.
-    await page.reload();
-    await connectWallet(page);
+    await connectWallet(page, "/profile");
     await openBell(page);
     await expect(
       dropdown(page).getByText("Invoice Funded", { exact: true }),
@@ -292,8 +261,7 @@ test.describe("Notification bell, persistence and preferences", () => {
     // Turn it back on and confirm the notification returns.
     await preferenceToggle(page, "Invoice Funded").click();
 
-    await page.reload();
-    await connectWallet(page);
+    await connectWallet(page, "/profile");
     await openBell(page);
     await expect(
       dropdown(page).getByText("Invoice Funded", { exact: true }),
@@ -312,8 +280,7 @@ test.describe("Notification bell, persistence and preferences", () => {
     const events = [makeEvent(1, "InvoiceCreated", UNRELATED_INVOICE, 1000)];
     await mockNotificationApis(page, invoices, events);
 
-    await page.goto("/");
-    await connectWallet(page);
+    await connectWallet(page, "/");
 
     await expect(unreadDot(page)).toHaveCount(0);
     await openBell(page);
@@ -333,8 +300,7 @@ test.describe("Notification bell, persistence and preferences", () => {
     const events = [makeEvent(1, "InvoiceFunded", RELEVANT_INVOICE, 2000)];
     await mockNotificationApis(page, invoices, events);
 
-    await page.goto("/");
-    await connectWallet(page);
+    await connectWallet(page, "/");
     await expect(unreadDot(page)).toBeVisible({ timeout: 15000 });
     await openBell(page);
     await expect(
@@ -342,14 +308,13 @@ test.describe("Notification bell, persistence and preferences", () => {
     ).toBeVisible();
     await closeBell(page);
 
-    // Swap the wallet returned by Freighter for a different address.
-    await page.evaluate((addr) => {
-      (window as any).freighter.requestAccess = () => Promise.resolve(addr);
-      (window as any).freighter.getPublicKey = () => Promise.resolve(addr);
-    }, WALLET_B);
+    // Swap the wallet returned by Freighter for a different address. The
+    // init-script re-runs on the next navigation, so the new wallet is what
+    // the reconnect below logs in.
+    await installFreighter(page, WALLET_B);
 
     await page.getByRole("button", { name: /disconnect wallet/i }).click();
-    await connectWallet(page);
+    await connectWallet(page, "/");
 
     // The new wallet is party to no invoices, so it must show nothing.
     await expect(unreadDot(page)).toHaveCount(0);

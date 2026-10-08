@@ -1,13 +1,14 @@
-import { expect, type Page } from "@playwright/test";
-import { test } from "./fixtures/freighter";
+import { expect } from "@playwright/test";
+import { connectWallet, test } from "./fixtures/freighter";
+import { setupStellarNetworkMocks } from "./mocks";
 
-const MOCK_WALLET = "GBMOCKWALLETADDRESSXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+const MOCK_WALLET = "GADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOZPI";
 
 const MOCK_INVOICES = [
   {
     id: "inv-listed-001",
     issuer: MOCK_WALLET,
-    buyer: "GBBUYERADDRESSXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+    buyer: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
     face_value: "10000000000",
     asset: "USDC",
     discount_bps: 200,
@@ -38,7 +39,7 @@ const MOCK_INVOICES = [
   {
     id: "inv-funded-002",
     issuer: MOCK_WALLET,
-    buyer: "GBBUYERADDRESSXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+    buyer: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
     face_value: "5000000000",
     asset: "USDC",
     discount_bps: 150,
@@ -68,111 +69,7 @@ const MOCK_INVOICES = [
   },
 ];
 
-async function setupStellarNetworkMocks(page: Page) {
-  await page.route("**/horizon-testnet.stellar.org/**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        id: MOCK_WALLET,
-        account_id: MOCK_WALLET,
-        sequence: "123456789",
-        subentry_count: 0,
-        balances: [],
-      }),
-    });
-  });
-
-  await page.route("**/soroban-testnet.stellar.org/**", async (route) => {
-    const body = route.request().postDataJSON() as {
-      id?: number;
-      method?: string;
-      params?: { transaction?: string };
-    };
-    const id = body?.id ?? 1;
-    const method = body?.method ?? "";
-
-    if (method === "getTransaction") {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id,
-          result: {
-            status: "SUCCESS",
-            txHash: "mock-onchain-tx-hash",
-            ledger: 12345,
-            createdAt: new Date().toISOString(),
-          },
-        }),
-      });
-      return;
-    }
-
-    if (method === "sendTransaction") {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id,
-          result: {
-            status: "PENDING",
-            hash: "mock-onchain-tx-hash",
-          },
-        }),
-      });
-      return;
-    }
-
-    if (method === "prepareTransaction") {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id,
-          result: {
-            transaction: body?.params?.transaction ?? "",
-            minResourceFee: "100",
-          },
-        }),
-      });
-      return;
-    }
-
-    if (method === "simulateTransaction") {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id,
-          result: {
-            transactionData: "",
-            minResourceFee: "100",
-            results: [{ auth: [], xdr: "" }],
-            cost: { cpuInsns: "0", memBytes: "0" },
-          },
-        }),
-      });
-      return;
-    }
-
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id,
-        result: {},
-      }),
-    });
-  });
-}
-
-async function setupMarketplaceApiMocks(page: Page) {
+async function setupMarketplaceApiMocks(page) {
   // Mock the invoices list endpoint, filtering by status query param
   await page.route("**/invoices**", async (route) => {
     const url = new URL(route.request().url());
@@ -221,26 +118,13 @@ async function setupMarketplaceApiMocks(page: Page) {
   });
 }
 
-async function connectWallet(page: Page) {
-  await page.goto("/marketplace");
-
-  const connectBtn = page.getByRole("button", { name: /Connect Wallet/i });
-  if (await connectBtn.isVisible()) {
-    await connectBtn.click();
-  }
-
-  await expect(page.getByText(/GBMOCK\.\.\.XXXX/i)).toBeVisible({
-    timeout: 15000,
-  });
-}
-
 test.describe("Marketplace Browse & Filter Flow", () => {
   test("loads marketplace, filters listed invoices by status, and views details", async ({
     page,
   }) => {
     await setupStellarNetworkMocks(page);
     await setupMarketplaceApiMocks(page);
-    await connectWallet(page);
+    await connectWallet(page, "/marketplace");
 
     // Assert the marketplace page loads
     await expect(
@@ -248,23 +132,43 @@ test.describe("Marketplace Browse & Filter Flow", () => {
     ).toBeVisible();
 
     // Default filter is "Listed" — the listed invoice should be visible
-    // (IDs are truncated in the table, e.g. "inv-li...001")
-    await expect(page.getByText(/inv-li\.\.\.001/i)).toBeVisible();
-    await expect(page.getByText(/inv-fu\.\.\.002/i)).not.toBeVisible();
+    // (IDs are truncated in the table, e.g. "inv-li...-001")
+    await expect(
+      page.getByRole("gridcell", { name: "inv-li..." }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("gridcell", { name: "inv-fu..." }),
+    ).not.toBeVisible();
 
     // Filter by "Funded" status
-    await page.locator("select").first().selectOption("Funded");
+    await page.locator("main select").first().selectOption("Funded");
 
     // The funded invoice should now be visible, and the listed one hidden
-    await expect(page.getByText(/inv-fu\.\.\.002/i)).toBeVisible();
-    await expect(page.getByText(/inv-li\.\.\.001/i)).not.toBeVisible();
+    await expect(
+      page.getByRole("gridcell", { name: "inv-fu..." }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("gridcell", { name: "inv-li..." }),
+    ).not.toBeVisible();
 
     // Select the funded invoice to view its details in the Management Center
-    await page.getByText(/inv-fu\.\.\.002/i).click();
+    // Rows are absolutely-positioned virtualized <tr> elements; click the row
+    // that contains the funded invoice's id cell.
+    await page.getByRole("row", { name: /inv-fu\.\.\.-002/i }).click();
 
-    // Assert the management center shows the selected invoice details
-    await expect(page.getByText(/POOL FINANCING PREVIEW/i)).toBeVisible();
-    await expect(page.getByText(/Face Value:/i)).toBeVisible();
-    await expect(page.getByText(/Funded Cost/i)).toBeVisible();
+    // Assert the management center shows the selected invoice details.
+    // Scope to the Management Center column: the ledger table also renders a
+    // hidden (md:hidden) mobile card per row, so unscoped getByText hits a
+    // strict-mode violation on the duplicated labels.
+    const managementCenter = page
+      .getByRole("heading", { name: /Management Center/i })
+      .locator("..");
+    await expect(
+      page.getByRole("heading", { name: /Management Center/i }),
+    ).toBeVisible();
+    await expect(
+      managementCenter.getByText(/Invoice obligation/i),
+    ).toBeVisible();
+    await expect(managementCenter.getByText(/Funded liquidity/i)).toBeVisible();
   });
 });

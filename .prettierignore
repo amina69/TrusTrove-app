@@ -7,3 +7,8 @@ dist/
 *.nft.json
 fix_tests.js
 docs/openapi/indexer.yaml
+
+# Playwright (E2E) output
+playwright-report/
+test-results/
+blob-report/
