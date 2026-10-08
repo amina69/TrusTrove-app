@@ -21,6 +21,11 @@ indexer/indexer.exe
 coverage/
 *.out
 
+# Playwright (E2E) output
+playwright-report/
+test-results/
+blob-report/
+
 # Debug logs
 npm-debug.log*
 yarn-debug.log*

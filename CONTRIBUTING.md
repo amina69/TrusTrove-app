@@ -108,7 +108,8 @@ pnpm --filter @trusttrove/sdk test
 
 > **Note:** `pnpm test` only covers the TypeScript packages (`@trusttrove/sdk`,
 > `@trusttrove/sdk-react`, `@trusttrove/cli` and `web`). It does **not** run
-> the Go indexer tests.
+> the Go indexer tests, and the Playwright E2E specs are run separately —
+> see [E2E tests](#5-e2e-tests-playwright) below.
 
 Example output (all passing):
 
@@ -119,6 +120,49 @@ Test Suites: 12 passed, 12 total
 Tests:       47 passed, 47 total
 Time:        2.34 s
 ```
+
+### 5. E2E tests (Playwright)
+
+The `apps/web/e2e` directory contains Playwright specs that run the real Next.js
+app in Chromium against a fully mocked network layer (Horizon, Soroban RPC and
+the indexer API are intercepted with `page.route`, so no testnet access is
+required).
+
+Prerequisites (first run only):
+
+```bash
+# From the repository root
+pnpm install
+
+# Install the Chromium browser (add --with-deps on CI/Linux for system libs)
+pnpm --filter web exec playwright install chromium
+```
+
+Run the suite locally:
+
+```bash
+# From the repository root
+pnpm --filter web test:e2e
+
+# Or, with the Playwright UI runner for debugging:
+pnpm --filter web exec playwright test --ui
+
+# Filter by file or test name
+pnpm --filter web exec playwright test e2e/sme-issuer-flow.spec.ts
+pnpm --filter web exec playwright test -g "CONFIRM DELIVERY"
+```
+
+By default the dev server is reused if it is already running on port 3000.
+When `CI=1` is set, Playwright starts a production server instead
+(`pnpm build && pnpm start`) — the same behavior as the CI workflow.
+
+Reports: an HTML report is written to `apps/web/playwright-report/` (open it
+with `pnpm --filter web exec playwright show-report`). Traces for retried
+failures land in `apps/web/test-results/`. All three output directories
+(`playwright-report/`, `test-results/`, `blob-report/`) are gitignored.
+
+CI runs the suite in a dedicated `verify-e2e` job on every push/PR to `main`
+and uploads `playwright-report/` as an artifact when the job fails.
 
 **Go tests** (indexer, run from the `indexer/` directory):
 
