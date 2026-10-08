@@ -93,10 +93,10 @@ go vet ./...
 
 The test suite is split across two runtimes. Both must pass before opening a PR.
 
-**TypeScript tests** (SDK + web, run from the repo root):
+**TypeScript tests** (SDK, CLI and web, run from the repo root):
 
 ```bash
-# Run all TypeScript workspace tests
+# Run all TypeScript workspace tests (includes @trusttrove/cli)
 pnpm test
 
 # Run frontend tests only
@@ -106,7 +106,9 @@ pnpm --filter web test
 pnpm --filter @trusttrove/sdk test
 ```
 
-> **Note:** `pnpm test` only covers the TypeScript packages (`@trusttrove/sdk` and `web`). It does **not** run the Go indexer tests.
+> **Note:** `pnpm test` only covers the TypeScript packages (`@trusttrove/sdk`,
+> `@trusttrove/sdk-react`, `@trusttrove/cli` and `web`). It does **not** run
+> the Go indexer tests.
 
 Example output (all passing):
 
